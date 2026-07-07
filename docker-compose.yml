@@ -1,0 +1,21 @@
+version: "3.9"
+
+services:
+  app:
+    build: .
+    container_name: user-api
+    ports:
+      - "8000:8000"
+    environment:
+      MONGO_URI: mongodb://mongodb:27017/ecommerce
+    env_file:
+      - .env
+    volumes:
+      - .:/user
+      - /user/node_modules
+    networks:
+      - backend-network
+
+networks:
+  backend-network:
+    external: true
