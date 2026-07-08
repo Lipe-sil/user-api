@@ -1,11 +1,21 @@
 import { UserService } from "../services/user.service";
-import jwt from "jsonwebtoken";
+import { NextFunction, Request, Response } from "express";
+import jwt, {
+    JsonWebTokenError,
+    TokenExpiredError,
+} from "jsonwebtoken";
+import { AuthRequest } from "../types/auth_request.types";
+
+
+interface JwtPayload {
+    userId: string;
+    role: string;
+}
 
 export class AuthMiddleware {
     constructor(private userService: UserService) { }
 
-
-    async canAccess(req: any, res: any, next: any) {
+    async canAccess(req: AuthRequest, res: Response, next: NextFunction) {
         try {
             const authHeader = req.headers.authorization;
 
@@ -16,7 +26,14 @@ export class AuthMiddleware {
                 });
             }
 
-            const token = authHeader.split(" ")[1];
+            if (!authHeader.startsWith("Bearer ")) {
+                return res.status(401).json({
+                    msg: "Invalid authorization header",
+                    code: 401
+                });
+            }
+
+            const token = authHeader.replace("Bearer ", "");
 
             if (!token) {
                 return res.status(401).json({
@@ -25,11 +42,9 @@ export class AuthMiddleware {
                 });
             }
 
-            const decoded: any = jwt.verify(token, process.env.JWT_SECRET!);
+            const decoded = jwt.verify(token, process.env.JWT_SECRET!) as JwtPayload;
 
-            req.userId = decoded.id;
-
-            const user = await this.userService.getUserById(req.userId);
+            const user = await this.userService.getUserById(decoded.userId);
 
             if (!user) {
                 return res.status(404).json({
@@ -37,23 +52,43 @@ export class AuthMiddleware {
                     code: 404
                 });
             }
+            req.user = user;
+
             next();
 
         } catch (err) {
-            return res.status(401).json({
-                msg: "Invalid token",
-                code: 401
+            if (err instanceof TokenExpiredError) {
+                return res.status(401).json({
+                    msg: "Expired token",
+                    code: 401,
+                });
+            }
+
+            if (err instanceof JsonWebTokenError) {
+                return res.status(401).json({
+                    msg: "Invalid token",
+                    code: 401,
+                });
+            }
+
+            return res.status(500).json({
+                msg: "Internal server error",
+                code: 500,
             });
         }
     }
 
-    async isTheSameUser(req: any, res: any, next: any) {
+    async isTheSameUser(req: AuthRequest, res: Response, next: NextFunction) {
         try {
-            const userId = req.userId;
+            if (!req.user) {
+                return res.status(403).json({ msg: "Forbidden: You can not access" })
+            }
+
+            const userId = req.user.id;
             const paramUserId = req.params.id;
 
             if (String(userId) !== String(paramUserId)) {
-                return res.status(403).json({ msg: "Forbidden: You can only access your own data", code: 403 });
+                return res.status(403).json({ msg: "Forbidden: You can not acess", code: 403 });
             }
             next();
         }
@@ -62,17 +97,14 @@ export class AuthMiddleware {
         }
     }
 
-
-    async isAdmin(req: any, res: any, next: any) {
+    async isAdmin(req: AuthRequest, res: Response, next: NextFunction) {
         try {
-            const userId = req.userId;
-            const result = await this.userService.getUserById(userId);
-
-            if (!result) {
+            const user = req.user
+            if (!user) {
                 return res.status(404).json({ msg: "User not found", code: 404 });
             }
 
-            if (result.user.role !== "admin") {
+            if (user.role !== "admin") {
                 return res.status(403).json({ msg: "Forbidden: Admins only", code: 403 });
             }
             next();

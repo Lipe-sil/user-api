@@ -10,4 +10,4 @@ COPY . .
 
 EXPOSE 3000
 
-CMD ["npx", "tsx", "src/index.ts"]
+CMD ["npx", "tsx", "src/server.ts"]

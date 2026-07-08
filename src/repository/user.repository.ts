@@ -23,4 +23,8 @@ export class UserRepository {
     async getAllUsers(): Promise<UserDocument[]> {
         return UserModel.find()
     }
+
+    async updateUser(id: string, data: Partial<User>): Promise<UserDocument | null> {
+        return UserModel.findByIdAndUpdate(id, data, { new: true })
+    }
 }

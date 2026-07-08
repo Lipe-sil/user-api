@@ -14,6 +14,7 @@ const userRouter = Router();
 
 userRouter.post("/users", userController.createUser.bind(userController));
 userRouter.get("/users", authMiddleware.canAccess.bind(authMiddleware), authMiddleware.isAdmin.bind(authMiddleware), userController.getAllUsers.bind(userController));
-userRouter.get("/users/:id", authMiddleware.canAccess.bind(authMiddleware), authMiddleware.isTheSameUser.bind(authMiddleware), userController.getUserById.bind(userController));
+userRouter.put("/users/:id/password", authMiddleware.canAccess.bind(authMiddleware), authMiddleware.isTheSameUser.bind(authMiddleware), userController.changePassword.bind(userController));
+userRouter.post("/users/request-password-reset", userController.requestPasswordReset.bind(userController));
 
 export default userRouter;
