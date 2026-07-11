@@ -76,7 +76,11 @@ export class UserService {
     };
   }
 
-  async getUserById(id: string): Promise<ResponseUserDTO | null> {
+  async getUserById(id: string | undefined): Promise<ResponseUserDTO | null> {
+    if (!id) {
+      throw new BadRequestError("Params not found");
+    }
+
     const user = await this.userRepository.getById(id);
     if (!user) {
       throw new NotFoundError("User not found");

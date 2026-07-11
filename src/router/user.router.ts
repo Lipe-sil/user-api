@@ -33,6 +33,11 @@ userRouter.get(
   authMiddleware.isAdmin.bind(authMiddleware),
   userController.getAllUsers.bind(userController),
 );
+userRouter.get(
+  "/users/me",
+  authMiddleware.canAccess.bind(authMiddleware),
+  userController.getMe.bind(userController),
+);
 userRouter.put(
   "/users/:id/password",
   authMiddleware.canAccess.bind(authMiddleware),

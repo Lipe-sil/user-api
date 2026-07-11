@@ -1,8 +1,9 @@
 import { UserService } from "../services/user.service";
 import { Request, Response } from "express";
+import { AuthRequest } from "../types/auth_request.types";
 
 export class UserController {
-  constructor(private userService: UserService) {}
+  constructor(private userService: UserService) { }
 
   async createUser(req: Request, res: Response): Promise<void> {
     const { name, lastName, email, password } = req.body;
@@ -46,6 +47,12 @@ export class UserController {
 
     res.status(200).json({
       message: result.msg,
+    });
+  }
+
+  async getMe(req: AuthRequest, res: Response): Promise<void> {
+    res.status(200).json({
+      data: req.user,
     });
   }
 }

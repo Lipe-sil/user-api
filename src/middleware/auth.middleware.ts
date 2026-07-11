@@ -4,16 +4,16 @@ import jwt, { JsonWebTokenError, TokenExpiredError } from "jsonwebtoken";
 import { AuthRequest } from "../types/auth_request.types";
 
 interface JwtPayload {
-  userId: string;
+  id: string;
   role: string;
 }
 
 export class AuthMiddleware {
-  constructor(private userService: UserService) {}
+  constructor(private userService: UserService) { }
 
   async canAccess(req: AuthRequest, res: Response, next: NextFunction) {
     try {
-      const authHeader = req.headers.authorization;
+      const authHeader = req?.headers?.authorization;
 
       if (!authHeader) {
         return res.status(401).json({
@@ -21,7 +21,6 @@ export class AuthMiddleware {
           code: 401,
         });
       }
-
       if (!authHeader.startsWith("Bearer ")) {
         return res.status(401).json({
           msg: "Invalid authorization header",
@@ -40,7 +39,7 @@ export class AuthMiddleware {
 
       const decoded = jwt.verify(token, process.env.JWT_SECRET!) as JwtPayload;
 
-      const user = await this.userService.getUserById(decoded.userId);
+      const user = await this.userService.getUserById(decoded.id);
 
       if (!user) {
         return res.status(404).json({
@@ -48,8 +47,8 @@ export class AuthMiddleware {
           code: 404,
         });
       }
-      req.user = user;
 
+      req.user = user;
       next();
     } catch (err) {
       if (err instanceof TokenExpiredError) {
@@ -65,7 +64,7 @@ export class AuthMiddleware {
           code: 401,
         });
       }
-
+      console.error(err)
       return res.status(500).json({
         msg: "Internal server error",
         code: 500,
