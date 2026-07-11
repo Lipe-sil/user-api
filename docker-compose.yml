@@ -6,16 +6,69 @@ services:
     container_name: user-api
     ports:
       - "8000:8000"
-    environment:
-      MONGO_URI: mongodb://mongodb:27017/ecommerce
     env_file:
       - .env
+    environment:
+      MONGO_URI: mongodb://mongodb:27017/ecommerce
+      REDIS_HOST: redis
+    depends_on:
+      - mongodb
+      - redis
     volumes:
       - .:/user
       - /user/node_modules
-    networks:
-      - backend-network
 
-networks:
-  backend-network:
-    external: true
+  tests:
+    build: .
+    command: npm test
+    environment:
+      MONGO_URI: mongodb://mongodb:27017/user_test
+      REDIS_HOST: redis
+      JWT_SECRET: test_secret
+    depends_on:
+      - mongodb
+      - redis
+    volumes:
+      - .:/user
+      - /user/node_modules
+    profiles:
+      - test
+
+  queue:
+    image: queue:latest
+    container_name: queue
+    env_file:
+      - .env
+    environment:
+      REDIS_HOST: redis
+    depends_on:
+      - redis
+
+  auth:
+    image: auth:latest
+    container_name: auth
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env
+    environment:
+      REDIS_HOST: redis
+      MONGO_URI: mongodb://mongodb:27017/ecommerce
+    depends_on:
+      - mongodb
+      - redis
+
+  mongodb:
+    image: mongo:8
+    container_name: mongodb
+    restart: unless-stopped
+    volumes:
+      - mongo_data:/data/db
+
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    restart: unless-stopped
+
+volumes:
+  mongo_data:

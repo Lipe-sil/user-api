@@ -1,84 +1,76 @@
 import { UserService } from "../services/user.service";
-import jwt from "jsonwebtoken";
+import { NextFunction, Response } from "express";
+import jwt, { JsonWebTokenError, TokenExpiredError } from "jsonwebtoken";
+import { AuthRequest } from "../types/auth_request.types";
+import { UnauthorizedError } from "../handler/error.handler";
+
+interface JwtPayload {
+  id: string;
+  role: string;
+}
 
 export class AuthMiddleware {
-    constructor(private userService: UserService) { }
+  constructor(private userService: UserService) { }
 
+  async canAccess(req: AuthRequest, res: Response, next: NextFunction) {
+    const authHeader = req?.headers?.authorization;
 
-    async canAccess(req: any, res: any, next: any) {
-        try {
-            const authHeader = req.headers.authorization;
-
-            if (!authHeader) {
-                return res.status(401).json({
-                    msg: "Authorization header missing",
-                    code: 401
-                });
-            }
-
-            const token = authHeader.split(" ")[1];
-
-            if (!token) {
-                return res.status(401).json({
-                    msg: "Token missing",
-                    code: 401
-                });
-            }
-
-            const decoded: any = jwt.verify(token, process.env.JWT_SECRET!);
-
-            req.userId = decoded.id;
-
-            const user = await this.userService.getUserById(req.userId);
-
-            if (!user) {
-                return res.status(404).json({
-                    msg: "User not found",
-                    code: 404
-                });
-            }
-            next();
-
-        } catch (err) {
-            return res.status(401).json({
-                msg: "Invalid token",
-                code: 401
-            });
-        }
+    if (!authHeader) {
+      throw new JsonWebTokenError("Authorization header missing");
+    }
+    if (!authHeader.startsWith("Bearer ")) {
+      throw new JsonWebTokenError("Invalid authorization header");
     }
 
-    async isTheSameUser(req: any, res: any, next: any) {
-        try {
-            const userId = req.userId;
-            const paramUserId = req.params.id;
+    const token = authHeader.replace("Bearer ", "");
 
-            if (String(userId) !== String(paramUserId)) {
-                return res.status(403).json({ msg: "Forbidden: You can only access your own data", code: 403 });
-            }
-            next();
-        }
-        catch (error: any) {
-            return res.status(500).json({ msg: "Internal server error", code: 500 });
-        }
+    if (!token) {
+      throw new JsonWebTokenError("Token missing");
     }
 
+    try {
+      const decoded = jwt.verify(
+        token,
+        process.env.JWT_SECRET!
+      ) as JwtPayload;
 
-    async isAdmin(req: any, res: any, next: any) {
-        try {
-            const userId = req.userId;
-            const result = await this.userService.getUserById(userId);
+      const user = await this.userService.getUserById(decoded.id);
 
-            if (!result) {
-                return res.status(404).json({ msg: "User not found", code: 404 });
-            }
+      if (!user) {
+        throw new UnauthorizedError("User not found");
+      }
 
-            if (result.user.role !== "admin") {
-                return res.status(403).json({ msg: "Forbidden: Admins only", code: 403 });
-            }
-            next();
-        }
-        catch (error: any) {
-            return res.status(500).json({ msg: "Internal server error", code: 500 });
-        }
+      req.user = user;
+      next();
+    } catch (err) {
+      throw new UnauthorizedError("Invalid token")
     }
+  }
+
+  async isTheSameUser(req: AuthRequest, res: Response, next: NextFunction) {
+    if (!req.user) {
+      throw new UnauthorizedError("You are not allowed to access this resource.");
+    }
+
+    const userId = req.user.id;
+    const paramUserId = req.params.id;
+
+    if (String(userId) !== String(paramUserId)) {
+      throw new UnauthorizedError("You are not allowed to access this resource.");
+    }
+    next();
+  }
+
+  async isAdmin(req: AuthRequest, res: Response, next: NextFunction) {
+    const user = req.user;
+    if (!user) {
+      throw new UnauthorizedError("User not found");
+    }
+
+    if (user.role !== "admin") {
+      throw new UnauthorizedError("Forbidden: Admins only");
+    }
+
+    next();
+  }
 }
