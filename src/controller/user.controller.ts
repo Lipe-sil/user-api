@@ -3,7 +3,7 @@ import { Request, Response } from "express";
 import { AuthRequest } from "../types/auth_request.types";
 
 export class UserController {
-  constructor(private userService: UserService) { }
+  constructor(private userService: UserService) {}
 
   async createUser(req: Request, res: Response): Promise<void> {
     const { name, lastName, email, password } = req.body;
