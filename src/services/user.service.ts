@@ -3,184 +3,166 @@ import { ResponseUserDTO } from "../dto/response_user.dto";
 import { UpdateUserDTO } from "../dto/update_user.dto";
 import { User } from "../models/user.model";
 import { UserRepository } from "../repository/user.repository";
-import bcrypt from 'bcrypt';
+import bcrypt from "bcrypt";
 import crypto from "crypto";
-
+import { UserQueue } from "../queue/queue";
+import { BadRequestError, ConflictError, NotFoundError } from "../handler/error.handler";
 
 export class UserService {
-    constructor(private userRepository: UserRepository) { }
+  constructor(
+    private userRepository: UserRepository,
+    private userQueue: UserQueue,
+  ) {}
 
-    async createUser(data: CreateUserDTO): Promise<{ msg: string, code: number }> {
-        try {
-            const existingUser = await this.userRepository.getByEmail(data.email);
-            if (existingUser) {
-                throw new Error("User with this email already exists");
-            }
-
-            const passwordHashed = await this.hashPassword(data.password);
-            const newUser: User = {
-                password: passwordHashed,
-                name: data.name,
-                lastName: data.lastName,
-                email: data.email,
-                code: crypto.randomBytes(32).toString("hex"),
-                active: false,
-                role: 'user',
-                resetPasswordToken: null,
-                refreshToken: null,
-                createdAt: new Date(),
-                updatedAt: new Date()
-            }
-
-
-            await this.userRepository.create(newUser);
-
-            return {
-                msg: "User created successfully",
-                code: 201
-            }
-
-        } catch (error: any) {
-            throw new Error("Error creating user: " + error.message);
-        }
+  async createUser(data: CreateUserDTO): Promise<{ msg: string }> {
+    const existingUser = await this.userRepository.getByEmail(data.email);
+    if (existingUser) {
+      throw new ConflictError("User with this email already exists");
     }
 
-    private async hashPassword(password: string): Promise<string> {
-        const saltRounds = 10;
-        return bcrypt.hash(password, saltRounds);
+    const passwordHashed = await this.hashPassword(data.password);
+    const newUser: User = {
+      password: passwordHashed,
+      name: data.name,
+      lastName: data.lastName,
+      email: data.email,
+      code: crypto.randomBytes(32).toString("hex"),
+      active: false,
+      role: "user",
+      resetPasswordToken: null,
+      refreshToken: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+
+    await this.userRepository.create(newUser);
+
+    if (!newUser.code) {
+      throw new Error("Error to generate user code");
     }
 
-    async verifyUser(email: string, code: string): Promise<{ msg: string, code: number }> {
-        try {
-            const user = await this.userRepository.getByEmail(email);
-            if (!user) {
-                throw new Error("User not found");
-            }
-
-            if (user.code !== code) {
-                throw new Error("Invalid verification code");
-            }
-            
-            await this.userRepository.activeUser(user._id.toString());
-
-            return {
-                msg: "User verified successfully",
-                code: 200
-            };
-
-        } catch (error: any) {
-            throw new Error("Error verifying user: " + error.message);
-        }
+    try {
+      await this.userQueue.sendVerificationCode(data.email, newUser.code);
+    } catch (error) {
+      console.error("Error to send verification code:", error);
     }
 
-    async sendVerificationEmail(email: string, code: string): Promise<void> {
-        console.log(`Sending verification email to ${email} with code: ${code}`);
+    return {
+      msg: "User created successfully",
+    };
+  }
+
+  private async hashPassword(password: string): Promise<string> {
+    const saltRounds = 10;
+    return bcrypt.hash(password, saltRounds);
+  }
+
+  async activeUserAccount(code: string): Promise<{ msg: string }> {
+    const user = await this.userRepository.getUserByVerifyCode(code);
+    if (!user) {
+      throw new NotFoundError("User not found");
     }
 
-    async getUserById(id: string): Promise<ResponseUserDTO | null> {
-        try {
-            const user = await this.userRepository.getById(id);
-            if (!user) {
-                return null
-            }
-            return {
-                id: user._id.toString(),
-                name: user.name,
-                lastName: user.lastName,
-                email: user.email,
-                active: user.active,
-                role: user.role,
-                createdAt: user.createdAt,
-                updatedAt: user.updatedAt
+    await this.userRepository.activeUser(user._id.toString());
 
-            };
-        } catch (error: any) {
-            throw new Error("Error retrieving user: " + error.message);
-        }
+    try {
+      await this.userQueue.sendWelcomeEmail(user.email, user.name);
+    } catch (err) {
+      console.log(`Error to send welcome email`, err);
     }
 
-    async changeUserPassword(id: string, newPassword: string, resetPasswordToken: string): Promise<{ msg: string }> {
-        try {
-            const user = await this.userRepository.getById(id);
-            if (!user) {
-                throw new Error("User not found");
-            }
+    return {
+      msg: "User verified successfully",
+    };
+  }
 
-            if (user.resetPasswordToken !== resetPasswordToken) {
-                throw new Error("Invalid reset password token");
-            }
-
-            const hashedPassword = await this.hashPassword(newPassword);
-            await this.userRepository.updateUser(id, { password: hashedPassword, resetPasswordToken: null, updatedAt: new Date() });
-            return {
-                msg: "Password changed successfully",
-            };
-        } catch (error: any) {
-            throw new Error("Error changing password: " + error.message);
-        }
+  async getUserById(id: string): Promise<ResponseUserDTO | null> {
+    const user = await this.userRepository.getById(id);
+    if (!user) {
+      throw new NotFoundError("User not found");
     }
 
-    async newPasswordRequest(email: string): Promise<{ msg: string }> {
-        try {
-            const user = await this.userRepository.getByEmail(email);
-            if (!user) {
-                throw new Error("User not found");
-            }
+    return new ResponseUserDTO(user);
+  }
 
-            const resetToken = crypto.randomBytes(32).toString("hex");;
-            await this.userRepository.updateUser(user._id.toString(), { resetPasswordToken: resetToken });
+  async changeUserPassword(token: string, newPassword: string): Promise<{ msg: string }> {
+    const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
 
-            console.log(`Sending password reset email to ${email} with token: ${resetToken}`);
+    const user = await this.userRepository.getUserByResetToken(tokenHash);
 
-            return {
-                msg: "Password reset request successful. Please check your email for further instructions.",
-            };
-        } catch (error: any) {
-            throw new Error("Error requesting new password: " + error.message);
-        }
+    if (!user) {
+      throw new BadRequestError("Invalid or expired reset password token");
     }
 
-    async getAllUsers(): Promise<{ msg: string, code: number, users?: ResponseUserDTO[] }> {
-        try {
-            const users = await this.userRepository.getAllUsers();
-            return {
-                msg: "Users retrieved successfully",
-                code: 200,
-                users: users.map(user => ({
-                    id: user._id.toString(),
-                    name: user.name,
-                    lastName: user.lastName,
-                    email: user.email,
-                    active: user.active,
-                    role: user.role,
-                    createdAt: user.createdAt,
-                    updatedAt: user.updatedAt
-                }))
-            };
-        } catch (error: any) {
-            throw new Error("Error retrieving users: " + error.message);
-        }
+    if (!user.resetPasswordExpires || user.resetPasswordExpires < new Date()) {
+      throw new BadRequestError("Reset password token has expired");
     }
 
-    async updateUser(id: string, data: Partial<UpdateUserDTO>): Promise<{ msg: string, code: number }> {
-        try {
-            const user = await this.userRepository.getById(id);
-            if (!user) {
-                throw new Error("User not found");
-            }
+    const hashedPassword = await this.hashPassword(newPassword);
 
-            const updateData = {
-                name: data.name,
-                lastName: data.lastName
-            }
+    await this.userRepository.updateUser(user._id.toString(), {
+      password: hashedPassword,
+      resetPasswordToken: null,
+      resetPasswordExpires: undefined,
+      updatedAt: new Date(),
+    });
 
-            await this.userRepository.updateUser(id, { ...updateData, updatedAt: new Date() });
-            return {
-                msg: "User updated successfully",
-                code: 200
-            };
-        } catch (error: any) {
-            throw new Error("Error updating user: " + error.message);
-        }
+    return {
+      msg: "Password changed successfully",
+    };
+  }
+
+  async newPasswordRequest(email: string): Promise<{ msg: string }> {
+    const user = await this.userRepository.getByEmail(email);
+    if (!user) {
+      return {
+        msg: "If an account with this email exists, you will receive password reset instructions.",
+      };
     }
+
+    const token = crypto.randomBytes(32).toString("hex");
+    const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
+
+    const expires = new Date(Date.now() + 15 * 60 * 1000);
+
+    await this.userRepository.updateUser(user._id.toString(), {
+      resetPasswordToken: tokenHash,
+      resetPasswordExpires: expires,
+    });
+
+    try {
+      await this.userQueue.sendResetPasswordEmail(user.email, token);
+    } catch (err) {
+      console.log(`Error to send password token`, err);
+    }
+
+    return {
+      msg: "If an account with this email exists, you will receive password reset instructions.",
+    };
+  }
+
+  async getAllUsers(): Promise<{ msg: string; users?: ResponseUserDTO[] }> {
+    const users = await this.userRepository.getAllUsers();
+    return {
+      msg: "Users retrieved successfully",
+      users: users.map((user) => new ResponseUserDTO(user)),
+    };
+  }
+
+  async updateUser(id: string, data: Partial<UpdateUserDTO>): Promise<{ msg: string }> {
+    const user = await this.userRepository.getById(id);
+    if (!user) {
+      throw new NotFoundError("User not found");
+    }
+
+    const updateData = {
+      name: data.name,
+      lastName: data.lastName,
+    };
+
+    await this.userRepository.updateUser(id, { ...updateData, updatedAt: new Date() });
+    return {
+      msg: "User updated successfully",
+    };
+  }
 }
